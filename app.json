@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "OneStep",
+    "slug": "onestep-offline-todo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "onestep",
+    "plugins": [
+      "expo-sqlite",
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "todo-reminders",
+          "color": "#2f6b4f"
+        }
+      ]
+    ],
+    "android": {
+      "package": "com.onestep.offlinetodo",
+      "permissions": [
+        "POST_NOTIFICATIONS",
+        "RECEIVE_BOOT_COMPLETED",
+        "SCHEDULE_EXACT_ALARM"
+      ]
+    }
+  }
+}
