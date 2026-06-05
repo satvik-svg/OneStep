@@ -15,14 +15,18 @@
   },
   "dependencies": {
     "expo": "~56.0.0",
+    "expo-constants": "~56.0.16",
+    "expo-file-system": "~56.0.7",
+    "expo-image-picker": "~56.0.15",
     "expo-notifications": "~56.0.15",
     "expo-sqlite": "~56.0.4",
     "react": "19.2.3",
-    "react-native": "0.85.3"
+    "react-native": "0.85.3",
+    "react-native-safe-area-context": "~5.7.0"
   },
   "devDependencies": {
     "@types/react": "~19.2.0",
     "babel-preset-expo": "~56.0.14",
-    "typescript": "~5.9.2"
+    "typescript": "~6.0.3"
   }
 }

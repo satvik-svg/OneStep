@@ -17,12 +17,21 @@ const getDatabase = async () => {
           date TEXT NOT NULL,
           reminder_at TEXT,
           notification_id TEXT,
+          image_uri TEXT,
           completed_at TEXT,
           created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_tasks_today
           ON tasks(date, completed_at, created_at);
       `);
+
+      const columns = await database.getAllAsync<{ name: string }>(
+        "PRAGMA table_info(tasks);"
+      );
+
+      if (!columns.some((column) => column.name === "image_uri")) {
+        await database.execAsync("ALTER TABLE tasks ADD COLUMN image_uri TEXT;");
+      }
 
       return database;
     });
@@ -35,7 +44,7 @@ export const initializeTasksDatabase = async () => {
   await getDatabase();
 };
 
-export const listTodayTasks = async (todayKey: string): Promise<Task[]> => {
+export const listOpenTasks = async (): Promise<Task[]> => {
   const database = await getDatabase();
 
   return database.getAllAsync<Task>(
@@ -46,16 +55,17 @@ export const listTodayTasks = async (todayKey: string): Promise<Task[]> => {
         date,
         reminder_at AS reminderAt,
         notification_id AS notificationId,
+        image_uri AS imageUri,
         completed_at AS completedAt,
         created_at AS createdAt
       FROM tasks
-      WHERE date = ? AND completed_at IS NULL
+      WHERE completed_at IS NULL
       ORDER BY
+        date DESC,
         CASE WHEN reminder_at IS NULL THEN 1 ELSE 0 END,
         reminder_at ASC,
         created_at ASC;
-    `,
-    todayKey
+    `
   );
 };
 
@@ -69,12 +79,19 @@ export const createTask = async (input: NewTaskInput): Promise<Task> => {
         date,
         reminder_at,
         notification_id,
+        image_uri,
         completed_at,
         created_at
       )
-      VALUES (?, ?, ?, NULL, NULL, ?);
+      VALUES (?, ?, ?, NULL, ?, NULL, ?);
     `,
-    [input.title.trim(), input.date, input.reminderAt, createdAt]
+    [
+      input.title.trim(),
+      input.date,
+      input.reminderAt,
+      input.imageUri,
+      createdAt
+    ]
   );
 
   return {
@@ -83,6 +100,7 @@ export const createTask = async (input: NewTaskInput): Promise<Task> => {
     date: input.date,
     reminderAt: input.reminderAt,
     notificationId: null,
+    imageUri: input.imageUri,
     completedAt: null,
     createdAt
   };

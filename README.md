@@ -5,8 +5,10 @@ OneStep is a simple Android-first Expo app for daily todos. It stores tasks on t
 ## Features
 
 - Add tasks for today.
+- Attach one optional image to a task.
 - Optionally add a reminder time in 24-hour format, such as `18:00`.
-- Show only today's incomplete tasks.
+- Search active tasks by keyword.
+- Show today's incomplete tasks and earlier unfinished tasks.
 - Mark a task complete to remove it from the Today list.
 - Delete a task and cancel its reminder.
 - Keep completed tasks in local SQLite with `completedAt`.
@@ -58,8 +60,21 @@ If a port is already busy, stop the old Metro terminal with `Ctrl+C`, or run Exp
 npx expo start --lan --clear --port 8084
 ```
 
+## Local Storage
+
+Tasks are stored in a SQLite database file on the phone through `expo-sqlite`. The database name is `onestep-todos.db`, and each task keeps its title, date, optional reminder time, optional notification id, optional image URI, completion time, and creation time.
+
+Attached images are copied into the app's local document folder under `task-images/`, and the database stores the local file URI. No task or image data is sent to a server. Restarting the app keeps the tasks and images because they persist in app-local storage. Uninstalling the app removes that local data.
+
+## Reminders
+
+When a reminder time is chosen, the app saves the task first, then asks Android to schedule one local notification for that exact task time. The returned notification id is stored with the task, so completing or deleting the task can cancel the pending notification.
+
+Expo Go on Android cannot run the full notifications module needed for this app, so reminders are skipped there and the task is still saved. To test real reminders, run a development build with `npm run android` or `npm run android:emulator`.
+
 ## Notes
 
 - Android notification permission is requested only when you add a task with a reminder.
 - If notification permission is denied, the task is still saved and the app shows that reminders need permission.
 - `SCHEDULE_EXACT_ALARM` is declared for Android 12+ so reminder timing can be as close as Android allows.
+- In Android Expo Go, todos work but reminder notifications are skipped with an in-app message. Use `npm run android` or `npm run android:emulator` for a development build when testing real reminders.

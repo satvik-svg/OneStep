@@ -4,25 +4,35 @@ import {
   Alert,
   AppState,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
   TextInput,
   View
 } from "react-native";
+import {
+  SafeAreaProvider,
+  SafeAreaView
+} from "react-native-safe-area-context";
 
 import {
   completeTask,
   createTask,
   deleteTask,
   initializeTasksDatabase,
-  listTodayTasks,
+  listOpenTasks,
   updateTaskNotificationId
 } from "./src/db/tasks";
+import {
+  deleteTaskImage,
+  persistTaskImage,
+  pickTaskImage,
+  type PickedTaskImage
+} from "./src/services/images";
 import {
   cancelTaskReminder,
   prepareReminderChannel,
@@ -30,6 +40,7 @@ import {
 } from "./src/services/reminders";
 import type { Task } from "./src/types";
 import {
+  formatDateKeyLabel,
   formatReminderTime,
   formatTodayLabel,
   getDefaultReminderTime,
@@ -37,7 +48,19 @@ import {
   parseTodayReminderTime
 } from "./src/utils/date";
 
+type TaskListRow =
+  | { id: string; title: string; type: "section" }
+  | { id: string; task: Task; type: "task" };
+
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <TodayApp />
+    </SafeAreaProvider>
+  );
+}
+
+function TodayApp() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [todayKey, setTodayKey] = useState(getTodayKey());
   const [loading, setLoading] = useState(true);
@@ -46,6 +69,10 @@ export default function App() {
   const [title, setTitle] = useState("");
   const [wantsReminder, setWantsReminder] = useState(false);
   const [timeText, setTimeText] = useState(getDefaultReminderTime());
+  const [selectedImage, setSelectedImage] = useState<PickedTaskImage | null>(
+    null
+  );
+  const [searchQuery, setSearchQuery] = useState("");
   const [message, setMessage] = useState<string | null>(null);
 
   const completedCountLabel = useMemo(() => {
@@ -56,8 +83,54 @@ export default function App() {
   const refreshTasks = useCallback(async () => {
     const currentTodayKey = getTodayKey();
     setTodayKey(currentTodayKey);
-    setTasks(await listTodayTasks(currentTodayKey));
+    setTasks(await listOpenTasks());
   }, []);
+
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+
+  const filteredTasks = useMemo(() => {
+    if (!normalizedSearchQuery) {
+      return tasks;
+    }
+
+    return tasks.filter((task) => {
+      return task.title.toLowerCase().includes(normalizedSearchQuery);
+    });
+  }, [normalizedSearchQuery, tasks]);
+
+  const taskRows = useMemo<TaskListRow[]>(() => {
+    const todayTasks = filteredTasks.filter((task) => task.date === todayKey);
+    const earlierTasks = filteredTasks.filter((task) => task.date < todayKey);
+    const rows: TaskListRow[] = [];
+
+    if (todayTasks.length > 0) {
+      rows.push({ id: "section-today", title: "Today", type: "section" });
+      rows.push(
+        ...todayTasks.map((task) => ({
+          id: `task-${task.id}`,
+          task,
+          type: "task" as const
+        }))
+      );
+    }
+
+    if (earlierTasks.length > 0) {
+      rows.push({
+        id: "section-earlier",
+        title: "Earlier unfinished",
+        type: "section"
+      });
+      rows.push(
+        ...earlierTasks.map((task) => ({
+          id: `task-${task.id}`,
+          task,
+          type: "task" as const
+        }))
+      );
+    }
+
+    return rows;
+  }, [filteredTasks, todayKey]);
 
   useEffect(() => {
     let isMounted = true;
@@ -67,11 +140,11 @@ export default function App() {
         await initializeTasksDatabase();
         await prepareReminderChannel();
         const currentTodayKey = getTodayKey();
-        const todayTasks = await listTodayTasks(currentTodayKey);
+        const openTasks = await listOpenTasks();
 
         if (isMounted) {
           setTodayKey(currentTodayKey);
-          setTasks(todayTasks);
+          setTasks(openTasks);
         }
       } catch (error) {
         setMessage("Could not load your tasks. Please restart the app.");
@@ -100,6 +173,25 @@ export default function App() {
     };
   }, [refreshTasks]);
 
+  const handlePickImage = async () => {
+    setMessage(null);
+
+    try {
+      const result = await pickTaskImage();
+
+      if (result.status === "denied") {
+        setMessage("Allow photo access to attach an image.");
+      }
+
+      if (result.status === "picked") {
+        setSelectedImage(result.image);
+      }
+    } catch (error) {
+      setMessage("Could not select the image. Please try again.");
+      console.warn(error);
+    }
+  };
+
   const handleAddTask = async () => {
     const trimmedTitle = title.trim();
 
@@ -120,13 +212,23 @@ export default function App() {
     setSaving(true);
     setMessage(null);
 
+    let persistedImageUri: string | null = null;
+    let taskCreated = false;
+
     try {
       const reminderDate = parsedReminder?.ok ? parsedReminder.date : null;
+
+      if (selectedImage) {
+        persistedImageUri = await persistTaskImage(selectedImage);
+      }
+
       const newTask = await createTask({
         title: trimmedTitle,
         date: getTodayKey(),
-        reminderAt: reminderDate ? reminderDate.toISOString() : null
+        reminderAt: reminderDate ? reminderDate.toISOString() : null,
+        imageUri: persistedImageUri
       });
+      taskCreated = true;
 
       if (reminderDate) {
         const reminderResult = await scheduleTaskReminder({
@@ -156,13 +258,24 @@ export default function App() {
         if (reminderResult.status === "skipped") {
           setMessage("Task saved without reminder because the time passed.");
         }
+
+        if (reminderResult.status === "unavailable") {
+          setMessage(
+            "Task saved. Reminder notifications need a development build on Android, so they are disabled in Expo Go."
+          );
+        }
       }
 
       setTitle("");
       setWantsReminder(false);
       setTimeText(getDefaultReminderTime());
+      setSelectedImage(null);
       await refreshTasks();
     } catch (error) {
+      if (persistedImageUri && !taskCreated) {
+        await deleteTaskImage(persistedImageUri);
+      }
+
       setMessage("Could not save the task. Please try again.");
       console.warn(error);
     } finally {
@@ -199,6 +312,7 @@ export default function App() {
           try {
             await cancelTaskReminder(task.notificationId);
             await deleteTask(task.id);
+            await deleteTaskImage(task.imageUri);
             await refreshTasks();
           } catch (error) {
             setMessage("Could not delete the task. Please try again.");
@@ -214,7 +328,11 @@ export default function App() {
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingScreen}>
-        <StatusBar barStyle="dark-content" backgroundColor="#f8f4ec" />
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor="#f8f4ec"
+          translucent={false}
+        />
         <ActivityIndicator color="#2f6b4f" size="large" />
         <Text style={styles.loadingText}>Loading today</Text>
       </SafeAreaView>
@@ -222,8 +340,12 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={styles.screen}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f8f4ec" />
+    <SafeAreaView edges={["top", "bottom"]} style={styles.screen}>
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor="#f8f4ec"
+        translucent={false}
+      />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.keyboardView}
@@ -239,6 +361,16 @@ export default function App() {
           </View>
         </View>
 
+        <TextInput
+          autoCapitalize="none"
+          onChangeText={setSearchQuery}
+          placeholder="Search active tasks"
+          placeholderTextColor="#8d887d"
+          returnKeyType="search"
+          style={styles.searchInput}
+          value={searchQuery}
+        />
+
         <View style={styles.form}>
           <TextInput
             autoCapitalize="sentences"
@@ -250,6 +382,34 @@ export default function App() {
             style={styles.taskInput}
             value={title}
           />
+
+          <View style={styles.attachRow}>
+            <Pressable
+              onPress={handlePickImage}
+              style={({ pressed }) => [
+                styles.imageButton,
+                pressed && styles.imageButtonPressed
+              ]}
+            >
+              <Text style={styles.imageButtonText}>+ Image</Text>
+            </Pressable>
+
+            {selectedImage ? (
+              <View style={styles.selectedImageWrap}>
+                <Image
+                  source={{ uri: selectedImage.uri }}
+                  style={styles.selectedImage}
+                />
+                <Pressable
+                  hitSlop={8}
+                  onPress={() => setSelectedImage(null)}
+                  style={styles.removeImageButton}
+                >
+                  <Text style={styles.removeImageText}>Remove</Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </View>
 
           <View style={styles.reminderRow}>
             <Pressable
@@ -309,27 +469,54 @@ export default function App() {
         <FlatList
           contentContainerStyle={[
             styles.listContent,
-            tasks.length === 0 && styles.emptyListContent
+            taskRows.length === 0 && styles.emptyListContent
           ]}
-          data={tasks}
-          keyExtractor={(item) => item.id.toString()}
+          data={taskRows}
+          keyExtractor={(item) => item.id}
           keyboardShouldPersistTaps="handled"
-          ListEmptyComponent={<EmptyToday />}
-          renderItem={({ item }) => (
-            <TaskItem
-              busy={busyTaskId === item.id}
-              onComplete={() => handleCompleteTask(item)}
-              onDelete={() => handleDeleteTask(item)}
-              task={item}
+          ListEmptyComponent={
+            <EmptyToday
+              hasTasks={tasks.length > 0}
+              searchQuery={searchQuery.trim()}
             />
-          )}
+          }
+          renderItem={({ item }) => {
+            if (item.type === "section") {
+              return <Text style={styles.sectionTitle}>{item.title}</Text>;
+            }
+
+            return (
+              <TaskItem
+                busy={busyTaskId === item.task.id}
+                onComplete={() => handleCompleteTask(item.task)}
+                onDelete={() => handleDeleteTask(item.task)}
+                task={item.task}
+                todayKey={todayKey}
+              />
+            );
+          }}
         />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-function EmptyToday() {
+function EmptyToday({
+  hasTasks,
+  searchQuery
+}: {
+  hasTasks: boolean;
+  searchQuery: string;
+}) {
+  if (hasTasks && searchQuery) {
+    return (
+      <View style={styles.emptyState}>
+        <Text style={styles.emptyTitle}>No matching tasks</Text>
+        <Text style={styles.emptyCopy}>Try a different search word.</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.emptyState}>
       <Text style={styles.emptyTitle}>All clear for today</Text>
@@ -342,18 +529,23 @@ function TaskItem({
   busy,
   onComplete,
   onDelete,
-  task
+  task,
+  todayKey
 }: {
   busy: boolean;
   onComplete: () => void;
   onDelete: () => void;
   task: Task;
+  todayKey: string;
 }) {
   const reminderLabel = task.reminderAt
     ? `${formatReminderTime(task.reminderAt)}${
         task.notificationId ? "" : " - not scheduled"
       }`
     : null;
+  const dateLabel =
+    task.date === todayKey ? null : formatDateKeyLabel(task.date);
+  const metaLabel = [dateLabel, reminderLabel].filter(Boolean).join(" - ");
 
   return (
     <View style={styles.taskRow}>
@@ -379,10 +571,13 @@ function TaskItem({
         <Text numberOfLines={2} style={styles.taskTitle}>
           {task.title}
         </Text>
-        {reminderLabel ? (
+        {metaLabel ? (
           <Text numberOfLines={1} style={styles.reminderMeta}>
-            {reminderLabel}
+            {metaLabel}
           </Text>
+        ) : null}
+        {task.imageUri ? (
+          <Image source={{ uri: task.imageUri }} style={styles.taskImage} />
         ) : null}
       </View>
 
@@ -468,6 +663,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 12
   },
+  searchInput: {
+    backgroundColor: "#ffffff",
+    borderColor: "#e2dccf",
+    borderRadius: 8,
+    borderWidth: 1,
+    color: "#25231f",
+    fontSize: 15,
+    minHeight: 44,
+    marginBottom: 12,
+    paddingHorizontal: 12
+  },
   taskInput: {
     backgroundColor: "#fbfaf7",
     borderColor: "#ded7cb",
@@ -477,6 +683,52 @@ const styles = StyleSheet.create({
     fontSize: 16,
     minHeight: 48,
     paddingHorizontal: 12
+  },
+  attachRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 12
+  },
+  imageButton: {
+    alignItems: "center",
+    backgroundColor: "#eef3f8",
+    borderColor: "#bac9d8",
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 40,
+    paddingHorizontal: 12
+  },
+  imageButtonPressed: {
+    backgroundColor: "#dfeaf3"
+  },
+  imageButtonText: {
+    color: "#394a67",
+    fontSize: 14,
+    fontWeight: "800"
+  },
+  selectedImageWrap: {
+    alignItems: "center",
+    flexDirection: "row",
+    flex: 1,
+    gap: 8,
+    minWidth: 0
+  },
+  selectedImage: {
+    backgroundColor: "#f1eee7",
+    borderRadius: 8,
+    height: 40,
+    width: 40
+  },
+  removeImageButton: {
+    paddingHorizontal: 4,
+    paddingVertical: 6
+  },
+  removeImageText: {
+    color: "#a83d2b",
+    fontSize: 13,
+    fontWeight: "800"
   },
   reminderRow: {
     alignItems: "center",
@@ -567,6 +819,13 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
     paddingTop: 16
   },
+  sectionTitle: {
+    color: "#6f675b",
+    fontSize: 13,
+    fontWeight: "800",
+    marginTop: 2,
+    textTransform: "uppercase"
+  },
   emptyListContent: {
     flexGrow: 1
   },
@@ -634,6 +893,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     marginTop: 4
+  },
+  taskImage: {
+    backgroundColor: "#f1eee7",
+    borderRadius: 8,
+    height: 92,
+    marginTop: 10,
+    width: 92
   },
   deleteButton: {
     alignItems: "center",

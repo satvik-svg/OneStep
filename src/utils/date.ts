@@ -19,6 +19,15 @@ export const formatReminderTime = (isoDate: string) => {
   }).format(new Date(isoDate));
 };
 
+export const formatDateKeyLabel = (dateKey: string) => {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric"
+  }).format(new Date(year, month - 1, day));
+};
+
 export const getDefaultReminderTime = () => {
   const date = new Date(Date.now() + 60 * 60 * 1000);
   date.setMinutes(0, 0, 0);

@@ -14,10 +14,19 @@
           "defaultChannel": "todo-reminders",
           "color": "#2f6b4f"
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow OneStep to attach images to your tasks."
+        }
       ]
     ],
     "android": {
       "package": "com.onestep.offlinetodo",
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "permissions": [
         "POST_NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED",
