@@ -5,6 +5,8 @@ export type Task = {
   reminderAt: string | null;
   notificationId: string | null;
   imageUri: string | null;
+  isRecurring: boolean;
+  completedTodayAt: string | null;
   completedAt: string | null;
   createdAt: string;
 };
@@ -14,4 +16,10 @@ export type NewTaskInput = {
   date: string;
   reminderAt: string | null;
   imageUri: string | null;
+  isRecurring: boolean;
+};
+
+export type DailyProgress = {
+  completed: number;
+  total: number;
 };

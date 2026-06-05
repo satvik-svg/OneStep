@@ -4,6 +4,7 @@
     "slug": "onestep-offline-todo",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "scheme": "onestep",
     "plugins": [
@@ -23,6 +24,10 @@
       ]
     ],
     "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#f8f4ec"
+      },
       "package": "com.onestep.offlinetodo",
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO"
@@ -30,7 +35,8 @@
       "permissions": [
         "POST_NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED",
-        "SCHEDULE_EXACT_ALARM"
+        "SCHEDULE_EXACT_ALARM",
+        "USE_EXACT_ALARM"
       ]
     }
   }

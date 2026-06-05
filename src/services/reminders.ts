@@ -6,9 +6,15 @@ export const REMINDER_CHANNEL_ID = "todo-reminders";
 type NotificationsModule = typeof import("expo-notifications");
 
 export type ReminderScheduleResult =
-  | { status: "scheduled"; notificationId: string }
+  | {
+      status: "scheduled";
+      notificationId: string;
+      nextTriggerAt: string | null;
+      scheduledCount: number | null;
+    }
   | { status: "denied" }
   | { status: "skipped"; reason: "past" }
+  | { status: "failed"; message: string }
   | { status: "unavailable"; reason: "expo-go-android" | "native-module" };
 
 const isAndroidExpoGo =
@@ -85,6 +91,35 @@ const hasNotificationPermission = async () => {
   return requested.granted || requested.status === "granted";
 };
 
+const getScheduleDetails = async (
+  Notifications: NotificationsModule,
+  trigger: any
+) => {
+  const [nextTriggerDate, scheduledNotifications] = await Promise.all([
+    Notifications.getNextTriggerDateAsync(trigger).catch(() => null),
+    Notifications.getAllScheduledNotificationsAsync().catch(() => null)
+  ]);
+
+  return {
+    nextTriggerAt: nextTriggerDate
+      ? new Date(nextTriggerDate).toISOString()
+      : null,
+    scheduledCount: scheduledNotifications?.length ?? null
+  };
+};
+
+const createReminderContent = (
+  Notifications: NotificationsModule,
+  input: { taskId: number; title: string; recurring: boolean }
+) => ({
+  title: input.recurring ? "OneStep daily reminder" : "OneStep reminder",
+  body: input.title,
+  data: { recurring: input.recurring, taskId: input.taskId },
+  priority: Notifications.AndroidNotificationPriority.HIGH,
+  sound: "default" as const,
+  vibrate: [0, 250, 250, 250]
+});
+
 export const scheduleTaskReminder = async (input: {
   taskId: number;
   title: string;
@@ -108,21 +143,81 @@ export const scheduleTaskReminder = async (input: {
     return { status: "denied" };
   }
 
-  const notificationId = await Notifications.scheduleNotificationAsync({
-    content: {
-      title: "OneStep reminder",
-      body: input.title,
-      data: { taskId: input.taskId },
-      sound: true
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DATE,
-      date: input.reminderAt,
-      channelId: REMINDER_CHANNEL_ID
-    }
-  });
+  const trigger = {
+    type: Notifications.SchedulableTriggerInputTypes.DATE,
+    date: input.reminderAt,
+    channelId: REMINDER_CHANNEL_ID
+  };
 
-  return { status: "scheduled", notificationId };
+  try {
+    const notificationId = await Notifications.scheduleNotificationAsync({
+      content: createReminderContent(Notifications, {
+        taskId: input.taskId,
+        title: input.title,
+        recurring: false
+      }),
+      trigger
+    });
+    const scheduleDetails = await getScheduleDetails(Notifications, trigger);
+
+    return { status: "scheduled", notificationId, ...scheduleDetails };
+  } catch (error) {
+    console.warn("Could not schedule reminder", error);
+    return {
+      status: "failed",
+      message:
+        "Task saved, but Android did not schedule the reminder. Check app notification and exact alarm settings."
+    };
+  }
+};
+
+export const scheduleDailyTaskReminder = async (input: {
+  taskId: number;
+  title: string;
+  hour: number;
+  minute: number;
+}): Promise<ReminderScheduleResult> => {
+  if (isAndroidExpoGo) {
+    return { status: "unavailable", reason: "expo-go-android" };
+  }
+
+  const Notifications = await loadNotifications();
+  if (!Notifications) {
+    return { status: "unavailable", reason: "native-module" };
+  }
+
+  const permissionGranted = await hasNotificationPermission();
+  if (!permissionGranted) {
+    return { status: "denied" };
+  }
+
+  const trigger = {
+    type: Notifications.SchedulableTriggerInputTypes.DAILY,
+    hour: input.hour,
+    minute: input.minute,
+    channelId: REMINDER_CHANNEL_ID
+  };
+
+  try {
+    const notificationId = await Notifications.scheduleNotificationAsync({
+      content: createReminderContent(Notifications, {
+        taskId: input.taskId,
+        title: input.title,
+        recurring: true
+      }),
+      trigger
+    });
+    const scheduleDetails = await getScheduleDetails(Notifications, trigger);
+
+    return { status: "scheduled", notificationId, ...scheduleDetails };
+  } catch (error) {
+    console.warn("Could not schedule daily reminder", error);
+    return {
+      status: "failed",
+      message:
+        "Daily task saved, but Android did not schedule the reminder. Check app notification and exact alarm settings."
+    };
+  }
 };
 
 export const cancelTaskReminder = async (notificationId: string | null) => {

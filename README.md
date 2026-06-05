@@ -5,11 +5,13 @@ OneStep is a simple Android-first Expo app for daily todos. It stores tasks on t
 ## Features
 
 - Add tasks for today.
+- Add daily recurring tasks that come back every day.
 - Attach one optional image to a task.
 - Optionally add a reminder time in 24-hour format, such as `18:00`.
 - Search active tasks by keyword.
 - Show today's incomplete tasks and earlier unfinished tasks.
 - Mark a task complete to remove it from the Today list.
+- See today's progress as completed tasks out of today's total.
 - Delete a task and cancel its reminder.
 - Keep completed tasks in local SQLite with `completedAt`.
 
@@ -84,13 +86,15 @@ npx expo start --lan --clear --port 8084
 
 ## Local Storage
 
-Tasks are stored in a SQLite database file on the phone through `expo-sqlite`. The database name is `onestep-todos.db`, and each task keeps its title, date, optional reminder time, optional notification id, optional image URI, completion time, and creation time.
+Tasks are stored in a SQLite database file on the phone through `expo-sqlite`. The database name is `onestep-todos.db`, and each task keeps its title, date, optional reminder time, optional notification id, optional image URI, recurring flag, completion time, and creation time.
+
+Daily recurring task completions are tracked in a separate local `task_completions` table by task id and date. That lets a daily task disappear after you complete it today, then appear again tomorrow without creating a duplicate task every day.
 
 Attached images are copied into the app's local document folder under `task-images/`, and the database stores the local file URI. No task or image data is sent to a server. Restarting the app keeps the tasks and images because they persist in app-local storage. Uninstalling the app removes that local data.
 
 ## Reminders
 
-When a reminder time is chosen, the app saves the task first, then asks Android to schedule one local notification for that exact task time. The returned notification id is stored with the task, so completing or deleting the task can cancel the pending notification.
+When a reminder time is chosen, the app saves the task first, then asks Android to schedule a local notification. One-time tasks schedule one notification for the selected time. Daily recurring tasks schedule a repeating daily notification. The returned notification id is stored with the task, so deleting the task can cancel the pending notification. Completing a one-time task cancels its reminder; completing a daily task only marks today done so future daily reminders remain.
 
 Expo Go on Android cannot run the full notifications module needed for this app, so reminders are skipped there and the task is still saved. To test real reminders, run a development build with `npm run android` or `npm run android:emulator`.
 
@@ -98,5 +102,5 @@ Expo Go on Android cannot run the full notifications module needed for this app,
 
 - Android notification permission is requested only when you add a task with a reminder.
 - If notification permission is denied, the task is still saved and the app shows that reminders need permission.
-- `SCHEDULE_EXACT_ALARM` is declared for Android 12+ so reminder timing can be as close as Android allows.
+- `SCHEDULE_EXACT_ALARM` and `USE_EXACT_ALARM` are declared for the personal offline APK so reminder timing can be as close as Android allows. If this app is later published to Google Play, review Google's exact-alarm policy first.
 - In Android Expo Go, todos work but reminder notifications are skipped with an in-app message. Use `npm run android` or `npm run android:emulator` for a development build when testing real reminders.

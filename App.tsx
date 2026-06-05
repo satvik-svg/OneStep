@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   AppState,
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   StatusBar,
@@ -23,8 +23,10 @@ import {
   completeTask,
   createTask,
   deleteTask,
+  getDailyProgress,
   initializeTasksDatabase,
   listOpenTasks,
+  listRecurringTasks,
   updateTaskNotificationId
 } from "./src/db/tasks";
 import {
@@ -36,9 +38,10 @@ import {
 import {
   cancelTaskReminder,
   prepareReminderChannel,
+  scheduleDailyTaskReminder,
   scheduleTaskReminder
 } from "./src/services/reminders";
-import type { Task } from "./src/types";
+import type { DailyProgress, Task } from "./src/types";
 import {
   formatDateKeyLabel,
   formatReminderTime,
@@ -52,6 +55,8 @@ type TaskListRow =
   | { id: string; title: string; type: "section" }
   | { id: string; task: Task; type: "task" };
 
+type AppTab = "today" | "daily";
+
 export default function App() {
   return (
     <SafeAreaProvider>
@@ -62,46 +67,93 @@ export default function App() {
 
 function TodayApp() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [recurringTasks, setRecurringTasks] = useState<Task[]>([]);
+  const [dailyProgress, setDailyProgress] = useState<DailyProgress>({
+    completed: 0,
+    total: 0
+  });
   const [todayKey, setTodayKey] = useState(getTodayKey());
+  const [activeTab, setActiveTab] = useState<AppTab>("today");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [busyTaskId, setBusyTaskId] = useState<number | null>(null);
   const [title, setTitle] = useState("");
+  const [isRecurring, setIsRecurring] = useState(false);
   const [wantsReminder, setWantsReminder] = useState(false);
   const [timeText, setTimeText] = useState(getDefaultReminderTime());
   const [selectedImage, setSelectedImage] = useState<PickedTaskImage | null>(
     null
   );
+  const [openImageUri, setOpenImageUri] = useState<string | null>(null);
+  const [taskPendingDelete, setTaskPendingDelete] = useState<Task | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [message, setMessage] = useState<string | null>(null);
 
+  const activeTasks = activeTab === "daily" ? recurringTasks : tasks;
+  const composerIsRecurring = activeTab === "daily" || isRecurring;
+
+  const progressLabel =
+    dailyProgress.total === 0
+      ? "0 of 0 done"
+      : `${dailyProgress.completed} of ${dailyProgress.total} done`;
+  const progressPercent =
+    dailyProgress.total === 0
+      ? 0
+      : Math.min(100, Math.round((dailyProgress.completed / dailyProgress.total) * 100));
+
   const completedCountLabel = useMemo(() => {
     const count = tasks.length;
-    return count === 1 ? "1 task left" : `${count} tasks left`;
+    return count === 1 ? "1 active task" : `${count} active tasks`;
   }, [tasks.length]);
 
   const refreshTasks = useCallback(async () => {
     const currentTodayKey = getTodayKey();
     setTodayKey(currentTodayKey);
-    setTasks(await listOpenTasks());
+    const [openTasks, dailyTasks, progress] = await Promise.all([
+      listOpenTasks(currentTodayKey),
+      listRecurringTasks(currentTodayKey),
+      getDailyProgress(currentTodayKey)
+    ]);
+    setTasks(openTasks);
+    setRecurringTasks(dailyTasks);
+    setDailyProgress(progress);
   }, []);
 
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
 
   const filteredTasks = useMemo(() => {
     if (!normalizedSearchQuery) {
-      return tasks;
+      return activeTasks;
     }
 
-    return tasks.filter((task) => {
+    return activeTasks.filter((task) => {
       return task.title.toLowerCase().includes(normalizedSearchQuery);
     });
-  }, [normalizedSearchQuery, tasks]);
+  }, [activeTasks, normalizedSearchQuery]);
 
   const taskRows = useMemo<TaskListRow[]>(() => {
     const todayTasks = filteredTasks.filter((task) => task.date === todayKey);
     const earlierTasks = filteredTasks.filter((task) => task.date < todayKey);
     const rows: TaskListRow[] = [];
+
+    if (activeTab === "daily") {
+      if (filteredTasks.length > 0) {
+        rows.push({
+          id: "section-daily",
+          title: "Every day",
+          type: "section"
+        });
+        rows.push(
+          ...filteredTasks.map((task) => ({
+            id: `task-${task.id}`,
+            task,
+            type: "task" as const
+          }))
+        );
+      }
+
+      return rows;
+    }
 
     if (todayTasks.length > 0) {
       rows.push({ id: "section-today", title: "Today", type: "section" });
@@ -130,7 +182,7 @@ function TodayApp() {
     }
 
     return rows;
-  }, [filteredTasks, todayKey]);
+  }, [activeTab, filteredTasks, todayKey]);
 
   useEffect(() => {
     let isMounted = true;
@@ -140,11 +192,17 @@ function TodayApp() {
         await initializeTasksDatabase();
         await prepareReminderChannel();
         const currentTodayKey = getTodayKey();
-        const openTasks = await listOpenTasks();
+        const [openTasks, dailyTasks, progress] = await Promise.all([
+          listOpenTasks(currentTodayKey),
+          listRecurringTasks(currentTodayKey),
+          getDailyProgress(currentTodayKey)
+        ]);
 
         if (isMounted) {
           setTodayKey(currentTodayKey);
           setTasks(openTasks);
+          setRecurringTasks(dailyTasks);
+          setDailyProgress(progress);
         }
       } catch (error) {
         setMessage("Could not load your tasks. Please restart the app.");
@@ -226,16 +284,24 @@ function TodayApp() {
         title: trimmedTitle,
         date: getTodayKey(),
         reminderAt: reminderDate ? reminderDate.toISOString() : null,
-        imageUri: persistedImageUri
+        imageUri: persistedImageUri,
+        isRecurring: composerIsRecurring
       });
       taskCreated = true;
 
       if (reminderDate) {
-        const reminderResult = await scheduleTaskReminder({
-          taskId: newTask.id,
-          title: newTask.title,
-          reminderAt: reminderDate
-        });
+        const reminderResult = composerIsRecurring
+          ? await scheduleDailyTaskReminder({
+              taskId: newTask.id,
+              title: newTask.title,
+              hour: reminderDate.getHours(),
+              minute: reminderDate.getMinutes()
+            })
+          : await scheduleTaskReminder({
+              taskId: newTask.id,
+              title: newTask.title,
+              reminderAt: reminderDate
+            });
 
         if (reminderResult.status === "scheduled") {
           try {
@@ -247,6 +313,15 @@ function TodayApp() {
             await cancelTaskReminder(reminderResult.notificationId);
             throw error;
           }
+
+          const scheduleLabel = reminderResult.nextTriggerAt
+            ? formatReminderTime(reminderResult.nextTriggerAt)
+            : formatReminderTime(reminderDate.toISOString());
+          setMessage(
+            composerIsRecurring
+              ? `Daily task saved. Reminder repeats near ${scheduleLabel}.`
+              : `Task saved. Reminder scheduled for ${scheduleLabel}.`
+          );
         }
 
         if (reminderResult.status === "denied") {
@@ -264,9 +339,14 @@ function TodayApp() {
             "Task saved. Reminder notifications need a development build on Android, so they are disabled in Expo Go."
           );
         }
+
+        if (reminderResult.status === "failed") {
+          setMessage(reminderResult.message);
+        }
       }
 
       setTitle("");
+      setIsRecurring(false);
       setWantsReminder(false);
       setTimeText(getDefaultReminderTime());
       setSelectedImage(null);
@@ -288,8 +368,10 @@ function TodayApp() {
     setMessage(null);
 
     try {
-      await cancelTaskReminder(task.notificationId);
-      await completeTask(task.id, new Date().toISOString());
+      if (!task.isRecurring) {
+        await cancelTaskReminder(task.notificationId);
+      }
+      await completeTask(task.id, todayKey, new Date().toISOString());
       await refreshTasks();
     } catch (error) {
       setMessage("Could not complete the task. Please try again.");
@@ -300,29 +382,30 @@ function TodayApp() {
   };
 
   const handleDeleteTask = (task: Task) => {
-    Alert.alert("Delete task?", task.title, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          setBusyTaskId(task.id);
-          setMessage(null);
+    setTaskPendingDelete(task);
+  };
 
-          try {
-            await cancelTaskReminder(task.notificationId);
-            await deleteTask(task.id);
-            await deleteTaskImage(task.imageUri);
-            await refreshTasks();
-          } catch (error) {
-            setMessage("Could not delete the task. Please try again.");
-            console.warn(error);
-          } finally {
-            setBusyTaskId(null);
-          }
-        }
-      }
-    ]);
+  const confirmDeleteTask = async () => {
+    if (!taskPendingDelete) {
+      return;
+    }
+
+    const task = taskPendingDelete;
+    setBusyTaskId(task.id);
+    setMessage(null);
+    setTaskPendingDelete(null);
+
+    try {
+      await cancelTaskReminder(task.notificationId);
+      await deleteTask(task.id);
+      await deleteTaskImage(task.imageUri);
+      await refreshTasks();
+    } catch (error) {
+      setMessage("Could not delete the task. Please try again.");
+      console.warn(error);
+    } finally {
+      setBusyTaskId(null);
+    }
   };
 
   if (loading) {
@@ -353,7 +436,9 @@ function TodayApp() {
         <View style={styles.header}>
           <View>
             <Text style={styles.appName}>OneStep</Text>
-            <Text style={styles.title}>Today</Text>
+            <Text style={styles.title}>
+              {activeTab === "daily" ? "Daily" : "Today"}
+            </Text>
           </View>
           <View style={styles.datePill}>
             <Text style={styles.dateText}>{formatTodayLabel()}</Text>
@@ -361,45 +446,138 @@ function TodayApp() {
           </View>
         </View>
 
-        <TextInput
-          autoCapitalize="none"
-          onChangeText={setSearchQuery}
-          placeholder="Search active tasks"
-          placeholderTextColor="#8d887d"
-          returnKeyType="search"
-          style={styles.searchInput}
-          value={searchQuery}
-        />
+        <View style={styles.progressPanel}>
+          <View style={styles.progressHeader}>
+            <Text style={styles.progressLabel}>Today progress</Text>
+            <Text style={styles.progressValue}>{progressLabel}</Text>
+          </View>
+          <View style={styles.progressTrack}>
+            <View
+              style={[
+                styles.progressFill,
+                { width: `${progressPercent}%` }
+              ]}
+            />
+          </View>
+        </View>
 
-        <View style={styles.form}>
-          <TextInput
-            autoCapitalize="sentences"
-            onChangeText={setTitle}
-            onSubmitEditing={handleAddTask}
-            placeholder="What do you need to do today?"
-            placeholderTextColor="#8d887d"
-            returnKeyType="done"
-            style={styles.taskInput}
-            value={title}
-          />
+        <View style={styles.quickAddBox}>
+          <View style={styles.quickAddRow}>
+            <TextInput
+              autoCapitalize="sentences"
+              onChangeText={setTitle}
+              onSubmitEditing={handleAddTask}
+              placeholder={
+                activeTab === "daily"
+                  ? "Add a daily task"
+                  : "Add a task"
+              }
+              placeholderTextColor="#8d887d"
+              returnKeyType="done"
+              style={styles.quickTaskInput}
+              value={title}
+            />
+            <Pressable
+              disabled={saving}
+              onPress={handleAddTask}
+              style={({ pressed }) => [
+                styles.quickAddButton,
+                pressed && styles.buttonPressed,
+                saving && styles.buttonDisabled
+              ]}
+            >
+              <Text style={styles.quickAddButtonText}>
+                {saving ? "..." : "+"}
+              </Text>
+            </Pressable>
+          </View>
 
-          <View style={styles.attachRow}>
+          <View style={styles.quickOptionsRow}>
+            <Pressable
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: composerIsRecurring }}
+              onPress={() => setIsRecurring((current) => !current)}
+              style={({ pressed }) => [
+                styles.optionChip,
+                composerIsRecurring && styles.optionChipActive,
+                pressed && styles.optionChipPressed
+              ]}
+            >
+              <Text
+                style={[
+                  styles.optionChipText,
+                  composerIsRecurring && styles.optionChipTextActive
+                ]}
+              >
+                Every day
+              </Text>
+            </Pressable>
+
+            <Pressable
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: wantsReminder }}
+              onPress={() => setWantsReminder((current) => !current)}
+              style={({ pressed }) => [
+                styles.optionChip,
+                wantsReminder && styles.optionChipActive,
+                pressed && styles.optionChipPressed
+              ]}
+            >
+              <Text
+                style={[
+                  styles.optionChipText,
+                  wantsReminder && styles.optionChipTextActive
+                ]}
+              >
+                Reminder
+              </Text>
+            </Pressable>
+
+            {wantsReminder ? (
+              <TextInput
+                inputMode="numeric"
+                maxLength={5}
+                onChangeText={setTimeText}
+                placeholder="18:00"
+                placeholderTextColor="#8d887d"
+                style={styles.compactTimeInput}
+                value={timeText}
+              />
+            ) : null}
+
             <Pressable
               onPress={handlePickImage}
               style={({ pressed }) => [
-                styles.imageButton,
-                pressed && styles.imageButtonPressed
+                styles.optionChip,
+                selectedImage && styles.optionChipActive,
+                pressed && styles.optionChipPressed
               ]}
             >
-              <Text style={styles.imageButtonText}>+ Image</Text>
+              <Text
+                style={[
+                  styles.optionChipText,
+                  selectedImage && styles.optionChipTextActive
+                ]}
+              >
+                Image
+              </Text>
             </Pressable>
 
             {selectedImage ? (
               <View style={styles.selectedImageWrap}>
-                <Image
-                  source={{ uri: selectedImage.uri }}
-                  style={styles.selectedImage}
-                />
+                <Pressable
+                  accessibilityLabel="Open selected image"
+                  onPress={() => setOpenImageUri(selectedImage.uri)}
+                  style={({ pressed }) => [
+                    styles.selectedImageButton,
+                    pressed && styles.imagePreviewPressed
+                  ]}
+                >
+                  <Image
+                    source={{ uri: selectedImage.uri }}
+                    style={styles.selectedImage}
+                  />
+                </Pressable>
                 <Pressable
                   hitSlop={8}
                   onPress={() => setSelectedImage(null)}
@@ -410,55 +588,19 @@ function TodayApp() {
               </View>
             ) : null}
           </View>
-
-          <View style={styles.reminderRow}>
-            <Pressable
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: wantsReminder }}
-              hitSlop={8}
-              onPress={() => setWantsReminder((current) => !current)}
-              style={[
-                styles.checkbox,
-                wantsReminder && styles.checkboxChecked
-              ]}
-            >
-              <Text
-                style={[
-                  styles.checkboxMark,
-                  wantsReminder && styles.checkboxMarkChecked
-                ]}
-              >
-                {wantsReminder ? "\u2713" : ""}
-              </Text>
-            </Pressable>
-            <Text style={styles.reminderLabel}>Reminder</Text>
-            <TextInput
-              editable={wantsReminder}
-              inputMode="numeric"
-              maxLength={5}
-              onChangeText={setTimeText}
-              placeholder="18:00"
-              placeholderTextColor="#a7a196"
-              style={[
-                styles.timeInput,
-                !wantsReminder && styles.timeInputDisabled
-              ]}
-              value={timeText}
-            />
-          </View>
-
-          <Pressable
-            disabled={saving}
-            onPress={handleAddTask}
-            style={({ pressed }) => [
-              styles.addButton,
-              pressed && styles.buttonPressed,
-              saving && styles.buttonDisabled
-            ]}
-          >
-            <Text style={styles.addButtonText}>{saving ? "Saving" : "+ Add"}</Text>
-          </Pressable>
         </View>
+
+        <TextInput
+          autoCapitalize="none"
+          onChangeText={setSearchQuery}
+          placeholder={
+            activeTab === "daily" ? "Search daily tasks" : "Search active tasks"
+          }
+          placeholderTextColor="#8d887d"
+          returnKeyType="search"
+          style={styles.searchInput}
+          value={searchQuery}
+        />
 
         {message ? (
           <View style={styles.messageBox}>
@@ -476,7 +618,8 @@ function TodayApp() {
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
             <EmptyToday
-              hasTasks={tasks.length > 0}
+              activeTab={activeTab}
+              hasTasks={activeTasks.length > 0}
               searchQuery={searchQuery.trim()}
             />
           }
@@ -490,6 +633,7 @@ function TodayApp() {
                 busy={busyTaskId === item.task.id}
                 onComplete={() => handleCompleteTask(item.task)}
                 onDelete={() => handleDeleteTask(item.task)}
+                onOpenImage={setOpenImageUri}
                 task={item.task}
                 todayKey={todayKey}
               />
@@ -497,14 +641,176 @@ function TodayApp() {
           }}
         />
       </KeyboardAvoidingView>
+      <LiquidTabBar activeTab={activeTab} onChange={setActiveTab} />
+      <ImagePreviewModal
+        imageUri={openImageUri}
+        onClose={() => setOpenImageUri(null)}
+      />
+      <DeleteConfirmModal
+        busy={Boolean(taskPendingDelete && busyTaskId === taskPendingDelete.id)}
+        onCancel={() => setTaskPendingDelete(null)}
+        onConfirm={confirmDeleteTask}
+        task={taskPendingDelete}
+      />
     </SafeAreaView>
   );
 }
 
+function ImagePreviewModal({
+  imageUri,
+  onClose
+}: {
+  imageUri: string | null;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      animationType="fade"
+      onRequestClose={onClose}
+      transparent
+      visible={Boolean(imageUri)}
+    >
+      <SafeAreaView edges={["top", "bottom"]} style={styles.imageModal}>
+        <View style={styles.imageModalHeader}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close image preview"
+            onPress={onClose}
+            style={({ pressed }) => [
+              styles.imageModalClose,
+              pressed && styles.imageModalClosePressed
+            ]}
+          >
+            <Text style={styles.imageModalCloseText}>Close</Text>
+          </Pressable>
+        </View>
+        <Pressable onPress={onClose} style={styles.imageModalBody}>
+          {imageUri ? (
+            <Image
+              resizeMode="contain"
+              source={{ uri: imageUri }}
+              style={styles.imageModalImage}
+            />
+          ) : null}
+        </Pressable>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+function DeleteConfirmModal({
+  busy,
+  onCancel,
+  onConfirm,
+  task
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+  task: Task | null;
+}) {
+  return (
+    <Modal
+      animationType="fade"
+      onRequestClose={onCancel}
+      transparent
+      visible={Boolean(task)}
+    >
+      <View style={styles.confirmOverlay}>
+        <Pressable onPress={onCancel} style={styles.confirmBackdrop} />
+        <SafeAreaView edges={["bottom"]} style={styles.confirmSheetWrap}>
+          <View style={styles.confirmSheet}>
+            <View style={styles.confirmHandle} />
+            <Text style={styles.confirmTitle}>Delete task?</Text>
+            <Text numberOfLines={2} style={styles.confirmTaskTitle}>
+              {task?.title}
+            </Text>
+            <View style={styles.confirmActions}>
+              <Pressable
+                disabled={busy}
+                onPress={onCancel}
+                style={({ pressed }) => [
+                  styles.confirmCancel,
+                  pressed && styles.confirmButtonPressed
+                ]}
+              >
+                <Text style={styles.confirmCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                disabled={busy}
+                onPress={onConfirm}
+                style={({ pressed }) => [
+                  styles.confirmDelete,
+                  pressed && styles.confirmButtonPressed,
+                  busy && styles.buttonDisabled
+                ]}
+              >
+                <Text style={styles.confirmDeleteText}>
+                  {busy ? "Deleting" : "Delete"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </SafeAreaView>
+      </View>
+    </Modal>
+  );
+}
+
+function LiquidTabBar({
+  activeTab,
+  onChange
+}: {
+  activeTab: AppTab;
+  onChange: (tab: AppTab) => void;
+}) {
+  const tabs: { key: AppTab; icon: string; label: string }[] = [
+    { key: "today", icon: "\u2713", label: "Today" },
+    { key: "daily", icon: "\u21bb", label: "Daily" }
+  ];
+
+  return (
+    <View style={styles.tabShell}>
+      <View style={styles.tabBar}>
+        {tabs.map((tab) => {
+          const active = activeTab === tab.key;
+
+          return (
+            <Pressable
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              key={tab.key}
+              onPress={() => onChange(tab.key)}
+              style={({ pressed }) => [
+                styles.tabButton,
+                active && styles.tabButtonActive,
+                pressed && styles.tabButtonPressed
+              ]}
+            >
+              <Text
+                style={[styles.tabIcon, active && styles.tabTextActive]}
+              >
+                {tab.icon}
+              </Text>
+              <Text
+                style={[styles.tabLabel, active && styles.tabTextActive]}
+              >
+                {tab.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 function EmptyToday({
+  activeTab,
   hasTasks,
   searchQuery
 }: {
+  activeTab: AppTab;
   hasTasks: boolean;
   searchQuery: string;
 }) {
@@ -519,8 +825,14 @@ function EmptyToday({
 
   return (
     <View style={styles.emptyState}>
-      <Text style={styles.emptyTitle}>All clear for today</Text>
-      <Text style={styles.emptyCopy}>Add one small task when you are ready.</Text>
+      <Text style={styles.emptyTitle}>
+        {activeTab === "daily" ? "No daily tasks yet" : "All clear for today"}
+      </Text>
+      <Text style={styles.emptyCopy}>
+        {activeTab === "daily"
+          ? "Add one task and mark it every day."
+          : "Add one small task when you are ready."}
+      </Text>
     </View>
   );
 }
@@ -529,15 +841,18 @@ function TaskItem({
   busy,
   onComplete,
   onDelete,
+  onOpenImage,
   task,
   todayKey
 }: {
   busy: boolean;
   onComplete: () => void;
   onDelete: () => void;
+  onOpenImage: (uri: string) => void;
   task: Task;
   todayKey: string;
 }) {
+  const doneToday = Boolean(task.completedTodayAt);
   const reminderLabel = task.reminderAt
     ? `${formatReminderTime(task.reminderAt)}${
         task.notificationId ? "" : " - not scheduled"
@@ -545,17 +860,22 @@ function TaskItem({
     : null;
   const dateLabel =
     task.date === todayKey ? null : formatDateKeyLabel(task.date);
-  const metaLabel = [dateLabel, reminderLabel].filter(Boolean).join(" - ");
+  const recurrenceLabel = task.isRecurring ? "Every day" : null;
+  const doneLabel = doneToday ? "Done today" : null;
+  const metaLabel = [doneLabel, recurrenceLabel, dateLabel, reminderLabel]
+    .filter(Boolean)
+    .join(" - ");
 
   return (
     <View style={styles.taskRow}>
       <Pressable
         accessibilityLabel={`Complete ${task.title}`}
-        disabled={busy}
+        disabled={busy || doneToday}
         hitSlop={8}
         onPress={onComplete}
         style={({ pressed }) => [
           styles.completeButton,
+          doneToday && styles.completeButtonDone,
           pressed && styles.completeButtonPressed,
           busy && styles.controlDisabled
         ]}
@@ -563,7 +883,14 @@ function TaskItem({
         {busy ? (
           <ActivityIndicator color="#2f6b4f" size="small" />
         ) : (
-          <Text style={styles.completeIcon}>{"\u2713"}</Text>
+          <Text
+            style={[
+              styles.completeIcon,
+              doneToday && styles.completeIconDone
+            ]}
+          >
+            {"\u2713"}
+          </Text>
         )}
       </Pressable>
 
@@ -577,7 +904,17 @@ function TaskItem({
           </Text>
         ) : null}
         {task.imageUri ? (
-          <Image source={{ uri: task.imageUri }} style={styles.taskImage} />
+          <Pressable
+            accessibilityLabel={`Open image for ${task.title}`}
+            onPress={() => onOpenImage(task.imageUri as string)}
+            style={({ pressed }) => [
+              styles.taskImageButton,
+              pressed && styles.imagePreviewPressed
+            ]}
+          >
+            <Image source={{ uri: task.imageUri }} style={styles.taskImage} />
+            <Text style={styles.taskImageHint}>Open image</Text>
+          </Pressable>
         ) : null}
       </View>
 
@@ -656,6 +993,123 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2
   },
+  progressPanel: {
+    backgroundColor: "#ffffff",
+    borderColor: "#e2dccf",
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 10,
+    padding: 12
+  },
+  progressHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between"
+  },
+  progressLabel: {
+    color: "#34312b",
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  progressValue: {
+    color: "#2f6b4f",
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  progressTrack: {
+    backgroundColor: "#edf0ed",
+    borderRadius: 999,
+    height: 8,
+    marginTop: 10,
+    overflow: "hidden"
+  },
+  progressFill: {
+    backgroundColor: "#2f6b4f",
+    borderRadius: 999,
+    height: "100%"
+  },
+  quickAddBox: {
+    backgroundColor: "#ffffff",
+    borderColor: "#e2dccf",
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 10
+  },
+  quickAddRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8
+  },
+  quickTaskInput: {
+    backgroundColor: "#fbfaf7",
+    borderColor: "#ded7cb",
+    borderRadius: 8,
+    borderWidth: 1,
+    color: "#25231f",
+    flex: 1,
+    fontSize: 15,
+    minHeight: 44,
+    paddingHorizontal: 12
+  },
+  quickAddButton: {
+    alignItems: "center",
+    backgroundColor: "#2f6b4f",
+    borderRadius: 8,
+    height: 44,
+    justifyContent: "center",
+    width: 48
+  },
+  quickAddButtonText: {
+    color: "#ffffff",
+    fontSize: 24,
+    fontWeight: "900",
+    lineHeight: 28
+  },
+  quickOptionsRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8
+  },
+  optionChip: {
+    alignItems: "center",
+    backgroundColor: "#f3f5f4",
+    borderColor: "#d8ded9",
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 34,
+    paddingHorizontal: 10
+  },
+  optionChipActive: {
+    backgroundColor: "#e4f0e9",
+    borderColor: "#94bda4"
+  },
+  optionChipPressed: {
+    opacity: 0.78
+  },
+  optionChipText: {
+    color: "#596057",
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  optionChipTextActive: {
+    color: "#2f6b4f"
+  },
+  compactTimeInput: {
+    backgroundColor: "#fbfaf7",
+    borderColor: "#c8b79d",
+    borderRadius: 8,
+    borderWidth: 1,
+    color: "#25231f",
+    fontSize: 14,
+    fontWeight: "800",
+    height: 34,
+    paddingHorizontal: 10,
+    textAlign: "center",
+    width: 76
+  },
   form: {
     backgroundColor: "#ffffff",
     borderColor: "#e2dccf",
@@ -672,6 +1126,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     minHeight: 44,
     marginBottom: 12,
+    marginTop: 10,
     paddingHorizontal: 12
   },
   taskInput: {
@@ -711,15 +1166,21 @@ const styles = StyleSheet.create({
   selectedImageWrap: {
     alignItems: "center",
     flexDirection: "row",
-    flex: 1,
     gap: 8,
     minWidth: 0
+  },
+  selectedImageButton: {
+    borderRadius: 8,
+    overflow: "hidden"
   },
   selectedImage: {
     backgroundColor: "#f1eee7",
     borderRadius: 8,
     height: 40,
     width: 40
+  },
+  imagePreviewPressed: {
+    opacity: 0.78
   },
   removeImageButton: {
     paddingHorizontal: 4,
@@ -816,7 +1277,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     gap: 10,
-    paddingBottom: 28,
+    paddingBottom: 110,
     paddingTop: 16
   },
   sectionTitle: {
@@ -872,11 +1333,18 @@ const styles = StyleSheet.create({
   completeButtonPressed: {
     backgroundColor: "#dcefe2"
   },
+  completeButtonDone: {
+    backgroundColor: "#2f6b4f",
+    borderColor: "#2f6b4f"
+  },
   completeIcon: {
     color: "#2f6b4f",
     fontSize: 22,
     fontWeight: "900",
     lineHeight: 24
+  },
+  completeIconDone: {
+    color: "#ffffff"
   },
   taskTextWrap: {
     flex: 1,
@@ -898,8 +1366,132 @@ const styles = StyleSheet.create({
     backgroundColor: "#f1eee7",
     borderRadius: 8,
     height: 92,
-    marginTop: 10,
     width: 92
+  },
+  taskImageButton: {
+    alignSelf: "flex-start",
+    marginTop: 10
+  },
+  taskImageHint: {
+    color: "#586b8f",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 4
+  },
+  imageModal: {
+    backgroundColor: "#111111",
+    flex: 1
+  },
+  imageModalHeader: {
+    alignItems: "flex-end",
+    paddingHorizontal: 16,
+    paddingTop: 10
+  },
+  imageModalClose: {
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    borderRadius: 8,
+    justifyContent: "center",
+    minHeight: 40,
+    paddingHorizontal: 14
+  },
+  imageModalClosePressed: {
+    opacity: 0.82
+  },
+  imageModalCloseText: {
+    color: "#25231f",
+    fontSize: 14,
+    fontWeight: "800"
+  },
+  imageModalBody: {
+    flex: 1,
+    padding: 16
+  },
+  imageModalImage: {
+    height: "100%",
+    width: "100%"
+  },
+  confirmOverlay: {
+    flex: 1,
+    justifyContent: "flex-end"
+  },
+  confirmBackdrop: {
+    backgroundColor: "rgba(22, 22, 20, 0.38)",
+    bottom: 0,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0
+  },
+  confirmSheetWrap: {
+    paddingHorizontal: 14,
+    paddingBottom: 8
+  },
+  confirmSheet: {
+    backgroundColor: "#fffdfa",
+    borderColor: "rgba(255, 255, 255, 0.72)",
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 16,
+    shadowColor: "#000000",
+    shadowOffset: { height: 12, width: 0 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24
+  },
+  confirmHandle: {
+    alignSelf: "center",
+    backgroundColor: "#d7d0c3",
+    borderRadius: 999,
+    height: 4,
+    marginBottom: 14,
+    width: 40
+  },
+  confirmTitle: {
+    color: "#25231f",
+    fontSize: 20,
+    fontWeight: "900",
+    textAlign: "center"
+  },
+  confirmTaskTitle: {
+    color: "#6f675b",
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 6,
+    textAlign: "center"
+  },
+  confirmActions: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 16
+  },
+  confirmCancel: {
+    alignItems: "center",
+    backgroundColor: "#f0ede6",
+    borderRadius: 8,
+    flex: 1,
+    justifyContent: "center",
+    minHeight: 46
+  },
+  confirmDelete: {
+    alignItems: "center",
+    backgroundColor: "#a83d2b",
+    borderRadius: 8,
+    flex: 1,
+    justifyContent: "center",
+    minHeight: 46
+  },
+  confirmButtonPressed: {
+    opacity: 0.82
+  },
+  confirmCancelText: {
+    color: "#34312b",
+    fontSize: 15,
+    fontWeight: "900"
+  },
+  confirmDeleteText: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "900"
   },
   deleteButton: {
     alignItems: "center",
@@ -921,5 +1513,57 @@ const styles = StyleSheet.create({
   },
   controlDisabled: {
     opacity: 0.48
+  },
+  tabShell: {
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 8
+  },
+  tabBar: {
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.78)",
+    borderColor: "rgba(255, 255, 255, 0.92)",
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 6,
+    minHeight: 64,
+    padding: 8,
+    shadowColor: "#000000",
+    shadowOffset: { height: 12, width: 0 },
+    shadowOpacity: 0.14,
+    shadowRadius: 22,
+    width: "100%"
+  },
+  tabButton: {
+    alignItems: "center",
+    borderRadius: 8,
+    flex: 1,
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "center",
+    minHeight: 48
+  },
+  tabButtonActive: {
+    backgroundColor: "rgba(47, 107, 79, 0.13)",
+    borderColor: "rgba(47, 107, 79, 0.26)",
+    borderWidth: 1
+  },
+  tabButtonPressed: {
+    opacity: 0.82
+  },
+  tabIcon: {
+    color: "#6f675b",
+    fontSize: 18,
+    fontWeight: "900",
+    lineHeight: 20
+  },
+  tabLabel: {
+    color: "#6f675b",
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  tabTextActive: {
+    color: "#2f6b4f"
   }
 });
