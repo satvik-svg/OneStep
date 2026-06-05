@@ -17,16 +17,46 @@ Install Node.js with npm first. Expo SDK 56 needs Node `22.13.x` or newer.
 
 ```sh
 npm install
-npx expo start
+npm run start:lan
 ```
 
-For the Android app build on your phone or emulator:
+Use the QR code from `start:lan` only when your phone and laptop are on the same Wi-Fi network and the network allows devices to talk to each other.
+
+Do not use `localhost` for a physical phone. `localhost` / `127.0.0.1` means "this same device", so a phone cannot reach your laptop through `exp://127.0.0.1:8082`.
+
+If your lab Wi-Fi blocks local device connections, use the tunnel command:
 
 ```sh
-npx expo run:android --device
+npm run start:tunnel
+```
+
+Tunnel mode uses the internet only for development preview. The app itself still stores todos offline on the phone and does not use a paid backend.
+
+For a USB-connected Android phone:
+
+```sh
+npm run android
+```
+
+For an Android emulator:
+
+```sh
+npm run android:emulator
 ```
 
 This uses local Android build tooling. It does not require a hosted server.
+
+To check Metro/Babel errors without opening the app:
+
+```sh
+npm run export:android
+```
+
+If a port is already busy, stop the old Metro terminal with `Ctrl+C`, or run Expo with another port:
+
+```sh
+npx expo start --lan --clear --port 8084
+```
 
 ## Notes
 
