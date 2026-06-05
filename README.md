@@ -48,6 +48,28 @@ npm run android:emulator
 
 This uses local Android build tooling. It does not require a hosted server.
 
+## Build Offline APK
+
+To create a real APK that installs on your phone without Expo Go:
+
+```sh
+npm run android:release
+```
+
+The APK is created here:
+
+```text
+android/app/build/outputs/apk/release/app-release.apk
+```
+
+Install it on a USB-connected Android phone:
+
+```sh
+npm run android:install-release
+```
+
+Or copy `app-release.apk` to your phone, open it from Files, and allow installing from that source if Android asks. After installation, OneStep opens from your phone like a normal app and does not need Metro, localhost, tunnel, Expo Go, or any backend.
+
 To check Metro/Babel errors without opening the app:
 
 ```sh

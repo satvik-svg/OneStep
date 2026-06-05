@@ -10,6 +10,8 @@
     "start:localhost": "expo start --localhost --clear",
     "android": "expo run:android --device",
     "android:emulator": "expo run:android",
+    "android:release": "cd android && ./gradlew assembleRelease",
+    "android:install-release": "cd android && ./gradlew installRelease",
     "export:android": "expo export --platform android --output-dir /private/tmp/onestep-export",
     "typecheck": "tsc --noEmit"
   },
