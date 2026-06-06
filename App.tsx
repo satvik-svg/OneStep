@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -18,6 +18,7 @@ import {
   SafeAreaProvider,
   SafeAreaView
 } from "react-native-safe-area-context";
+import { BlurView } from "expo-blur";
 
 import {
   completeTask,
@@ -88,6 +89,7 @@ function TodayApp() {
   const [taskPendingDelete, setTaskPendingDelete] = useState<Task | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const titleInputRef = useRef<TextInput | null>(null);
 
   const activeTasks = activeTab === "daily" ? recurringTasks : tasks;
   const composerIsRecurring = activeTab === "daily" || isRecurring;
@@ -101,10 +103,11 @@ function TodayApp() {
       ? 0
       : Math.min(100, Math.round((dailyProgress.completed / dailyProgress.total) * 100));
 
-  const completedCountLabel = useMemo(() => {
-    const count = tasks.length;
-    return count === 1 ? "1 active task" : `${count} active tasks`;
-  }, [tasks.length]);
+  const activeCountLabel = useMemo(() => {
+    const count = activeTasks.length;
+    const noun = activeTab === "daily" ? "daily task" : "active task";
+    return count === 1 ? `1 ${noun}` : `${count} ${noun}s`;
+  }, [activeTab, activeTasks.length]);
 
   const refreshTasks = useCallback(async () => {
     const currentTodayKey = getTodayKey();
@@ -442,22 +445,16 @@ function TodayApp() {
           </View>
           <View style={styles.datePill}>
             <Text style={styles.dateText}>{formatTodayLabel()}</Text>
-            <Text style={styles.countText}>{completedCountLabel}</Text>
-          </View>
-        </View>
-
-        <View style={styles.progressPanel}>
-          <View style={styles.progressHeader}>
-            <Text style={styles.progressLabel}>Today progress</Text>
-            <Text style={styles.progressValue}>{progressLabel}</Text>
-          </View>
-          <View style={styles.progressTrack}>
-            <View
-              style={[
-                styles.progressFill,
-                { width: `${progressPercent}%` }
-              ]}
-            />
+            <Text style={styles.countText}>{activeCountLabel}</Text>
+            <View style={styles.dateProgressTrack}>
+              <View
+                style={[
+                  styles.dateProgressFill,
+                  { width: `${progressPercent}%` }
+                ]}
+              />
+            </View>
+            <Text style={styles.progressTinyText}>{progressLabel}</Text>
           </View>
         </View>
 
@@ -474,6 +471,7 @@ function TodayApp() {
               }
               placeholderTextColor="#8d887d"
               returnKeyType="done"
+              ref={titleInputRef}
               style={styles.quickTaskInput}
               value={title}
             />
@@ -509,7 +507,7 @@ function TodayApp() {
                   composerIsRecurring && styles.optionChipTextActive
                 ]}
               >
-                Every day
+                Daily
               </Text>
             </Pressable>
 
@@ -534,15 +532,18 @@ function TodayApp() {
             </Pressable>
 
             {wantsReminder ? (
-              <TextInput
-                inputMode="numeric"
-                maxLength={5}
-                onChangeText={setTimeText}
-                placeholder="18:00"
-                placeholderTextColor="#8d887d"
-                style={styles.compactTimeInput}
-                value={timeText}
-              />
+              <View style={styles.compactTimeField}>
+                <Text style={styles.compactTimeLabel}>Time</Text>
+                <TextInput
+                  inputMode="numeric"
+                  maxLength={5}
+                  onChangeText={setTimeText}
+                  placeholder="18:00"
+                  placeholderTextColor="#6f675b"
+                  style={styles.compactTimeInput}
+                  value={timeText}
+                />
+              </View>
             ) : null}
 
             <Pressable
@@ -563,44 +564,50 @@ function TodayApp() {
               </Text>
             </Pressable>
 
-            {selectedImage ? (
-              <View style={styles.selectedImageWrap}>
-                <Pressable
-                  accessibilityLabel="Open selected image"
-                  onPress={() => setOpenImageUri(selectedImage.uri)}
-                  style={({ pressed }) => [
-                    styles.selectedImageButton,
-                    pressed && styles.imagePreviewPressed
-                  ]}
-                >
-                  <Image
-                    source={{ uri: selectedImage.uri }}
-                    style={styles.selectedImage}
-                  />
-                </Pressable>
-                <Pressable
-                  hitSlop={8}
-                  onPress={() => setSelectedImage(null)}
-                  style={styles.removeImageButton}
-                >
-                  <Text style={styles.removeImageText}>Remove</Text>
-                </Pressable>
-              </View>
-            ) : null}
           </View>
+
+          {selectedImage ? (
+            <View style={styles.selectedImageWrap}>
+              <Pressable
+                accessibilityLabel="Open selected image"
+                onPress={() => setOpenImageUri(selectedImage.uri)}
+                style={({ pressed }) => [
+                  styles.selectedImageButton,
+                  pressed && styles.imagePreviewPressed
+                ]}
+              >
+                <Image
+                  source={{ uri: selectedImage.uri }}
+                  style={styles.selectedImage}
+                />
+              </Pressable>
+              <Text style={styles.selectedImageLabel}>Image attached</Text>
+              <Pressable
+                hitSlop={8}
+                onPress={() => setSelectedImage(null)}
+                style={styles.removeImageButton}
+              >
+                <Text style={styles.removeImageText}>Remove</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
 
-        <TextInput
-          autoCapitalize="none"
-          onChangeText={setSearchQuery}
-          placeholder={
-            activeTab === "daily" ? "Search daily tasks" : "Search active tasks"
-          }
-          placeholderTextColor="#8d887d"
-          returnKeyType="search"
-          style={styles.searchInput}
-          value={searchQuery}
-        />
+        {activeTasks.length > 0 || searchQuery ? (
+          <TextInput
+            autoCapitalize="none"
+            onChangeText={setSearchQuery}
+            placeholder={
+              activeTab === "daily"
+                ? "Search daily tasks"
+                : "Search active tasks"
+            }
+            placeholderTextColor="#8d887d"
+            returnKeyType="search"
+            style={styles.searchInput}
+            value={searchQuery}
+          />
+        ) : null}
 
         {message ? (
           <View style={styles.messageBox}>
@@ -641,7 +648,14 @@ function TodayApp() {
           }}
         />
       </KeyboardAvoidingView>
-      <LiquidTabBar activeTab={activeTab} onChange={setActiveTab} />
+      <LiquidTabBar
+        activeTab={activeTab}
+        onChange={setActiveTab}
+        onQuickAdd={() => {
+          setActiveTab("today");
+          titleInputRef.current?.focus();
+        }}
+      />
       <ImagePreviewModal
         imageUri={openImageUri}
         onClose={() => setOpenImageUri(null)}
@@ -759,48 +773,65 @@ function DeleteConfirmModal({
 
 function LiquidTabBar({
   activeTab,
-  onChange
+  onChange,
+  onQuickAdd
 }: {
   activeTab: AppTab;
   onChange: (tab: AppTab) => void;
+  onQuickAdd: () => void;
 }) {
   const tabs: { key: AppTab; icon: string; label: string }[] = [
-    { key: "today", icon: "\u2713", label: "Today" },
+    { key: "today", icon: "\u2302", label: "Home" },
     { key: "daily", icon: "\u21bb", label: "Daily" }
   ];
 
   return (
-    <View style={styles.tabShell}>
-      <View style={styles.tabBar}>
-        {tabs.map((tab) => {
-          const active = activeTab === tab.key;
+    <View style={styles.tabShell} pointerEvents="box-none">
+      <View style={styles.tabBarWrap}>
+        <BlurView intensity={65} tint="light" style={styles.tabBar}>
+          {tabs.map((tab) => {
+            const active = activeTab === tab.key;
 
-          return (
-            <Pressable
-              accessibilityRole="tab"
-              accessibilityState={{ selected: active }}
-              key={tab.key}
-              onPress={() => onChange(tab.key)}
-              style={({ pressed }) => [
-                styles.tabButton,
-                active && styles.tabButtonActive,
-                pressed && styles.tabButtonPressed
-              ]}
-            >
-              <Text
-                style={[styles.tabIcon, active && styles.tabTextActive]}
+            return (
+              <Pressable
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                key={tab.key}
+                onPress={() => onChange(tab.key)}
+                style={({ pressed }) => [
+                  styles.tabButton,
+                  active && styles.tabButtonActive,
+                  pressed && styles.tabButtonPressed
+                ]}
               >
-                {tab.icon}
-              </Text>
-              <Text
-                style={[styles.tabLabel, active && styles.tabTextActive]}
-              >
-                {tab.label}
-              </Text>
-            </Pressable>
-          );
-        })}
+                <Text
+                  style={[styles.tabIcon, active && styles.tabTextActive]}
+                >
+                  {tab.icon}
+                </Text>
+                <Text
+                  style={[styles.tabLabel, active && styles.tabTextActive]}
+                >
+                  {tab.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </BlurView>
       </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Quick add task"
+        onPress={onQuickAdd}
+        style={({ pressed }) => [
+          styles.tabQuickButtonWrap,
+          pressed && styles.tabButtonPressed
+        ]}
+      >
+        <BlurView intensity={65} tint="light" style={styles.tabQuickButton}>
+          <Text style={styles.tabQuickIcon}>+</Text>
+        </BlurView>
+      </Pressable>
     </View>
   );
 }
@@ -960,7 +991,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 18
+    marginBottom: 12
   },
   appName: {
     color: "#2f6b4f",
@@ -980,8 +1011,9 @@ const styles = StyleSheet.create({
     borderColor: "#e2dccf",
     borderRadius: 8,
     borderWidth: 1,
+    minWidth: 126,
     paddingHorizontal: 12,
-    paddingVertical: 10
+    paddingVertical: 9
   },
   dateText: {
     color: "#394a67",
@@ -992,6 +1024,25 @@ const styles = StyleSheet.create({
     color: "#766f63",
     fontSize: 12,
     marginTop: 2
+  },
+  dateProgressTrack: {
+    backgroundColor: "#edf0ed",
+    borderRadius: 999,
+    height: 5,
+    marginTop: 7,
+    overflow: "hidden",
+    width: "100%"
+  },
+  dateProgressFill: {
+    backgroundColor: "#2f6b4f",
+    borderRadius: 999,
+    height: "100%"
+  },
+  progressTinyText: {
+    color: "#2f6b4f",
+    fontSize: 11,
+    fontWeight: "900",
+    marginTop: 4
   },
   progressPanel: {
     backgroundColor: "#ffffff",
@@ -1033,6 +1084,7 @@ const styles = StyleSheet.create({
     borderColor: "#e2dccf",
     borderRadius: 8,
     borderWidth: 1,
+    marginTop: 2,
     padding: 10
   },
   quickAddRow: {
@@ -1069,8 +1121,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 8
+    gap: 7,
+    marginTop: 7
   },
   optionChip: {
     alignItems: "center",
@@ -1098,17 +1150,32 @@ const styles = StyleSheet.create({
     color: "#2f6b4f"
   },
   compactTimeInput: {
-    backgroundColor: "#fbfaf7",
-    borderColor: "#c8b79d",
+    backgroundColor: "transparent",
+    color: "#25231f",
+    fontSize: 16,
+    fontWeight: "900",
+    height: 32,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    textAlign: "center",
+    width: 58
+  },
+  compactTimeField: {
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    borderColor: "#2f6b4f",
     borderRadius: 8,
     borderWidth: 1,
-    color: "#25231f",
-    fontSize: 14,
-    fontWeight: "800",
-    height: 34,
-    paddingHorizontal: 10,
-    textAlign: "center",
-    width: 76
+    flexDirection: "row",
+    gap: 6,
+    minHeight: 36,
+    paddingHorizontal: 10
+  },
+  compactTimeLabel: {
+    color: "#2f6b4f",
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase"
   },
   form: {
     backgroundColor: "#ffffff",
@@ -1124,9 +1191,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     color: "#25231f",
     fontSize: 15,
-    minHeight: 44,
+    minHeight: 42,
     marginBottom: 12,
-    marginTop: 10,
+    marginTop: 8,
     paddingHorizontal: 12
   },
   taskInput: {
@@ -1165,9 +1232,17 @@ const styles = StyleSheet.create({
   },
   selectedImageWrap: {
     alignItems: "center",
+    backgroundColor: "#fbfaf7",
+    borderColor: "#e2dccf",
+    borderRadius: 8,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 8,
-    minWidth: 0
+    marginTop: 8,
+    minHeight: 42,
+    minWidth: 0,
+    paddingHorizontal: 8,
+    paddingVertical: 6
   },
   selectedImageButton: {
     borderRadius: 8,
@@ -1176,8 +1251,14 @@ const styles = StyleSheet.create({
   selectedImage: {
     backgroundColor: "#f1eee7",
     borderRadius: 8,
-    height: 40,
-    width: 40
+    height: 32,
+    width: 32
+  },
+  selectedImageLabel: {
+    color: "#394a67",
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "800"
   },
   imagePreviewPressed: {
     opacity: 0.78
@@ -1277,8 +1358,8 @@ const styles = StyleSheet.create({
   },
   listContent: {
     gap: 10,
-    paddingBottom: 110,
-    paddingTop: 16
+    paddingBottom: 122,
+    paddingTop: 12
   },
   sectionTitle: {
     color: "#6f675b",
@@ -1515,38 +1596,44 @@ const styles = StyleSheet.create({
     opacity: 0.48
   },
   tabShell: {
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingBottom: 8
+    bottom: 24,
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 12,
+    left: 0,
+    position: "absolute",
+    right: 0
+  },
+  tabBarWrap: {
+    borderRadius: 29,
+    shadowColor: "#000000",
+    shadowOffset: { height: 8, width: 0 },
+    shadowOpacity: 0.12,
+    shadowRadius: 24
   },
   tabBar: {
     alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.78)",
-    borderColor: "rgba(255, 255, 255, 0.92)",
-    borderRadius: 8,
-    borderWidth: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.45)",
+    borderColor: "rgba(255, 255, 255, 0.9)",
+    borderRadius: 29,
+    borderWidth: 1.5,
     flexDirection: "row",
     gap: 6,
-    minHeight: 64,
-    padding: 8,
-    shadowColor: "#000000",
-    shadowOffset: { height: 12, width: 0 },
-    shadowOpacity: 0.14,
-    shadowRadius: 22,
-    width: "100%"
+    minHeight: 58,
+    overflow: "hidden",
+    padding: 6
   },
   tabButton: {
     alignItems: "center",
-    borderRadius: 8,
-    flex: 1,
-    flexDirection: "row",
-    gap: 8,
+    borderRadius: 23,
+    gap: 2,
     justifyContent: "center",
-    minHeight: 48
+    minHeight: 46,
+    paddingHorizontal: 24
   },
   tabButtonActive: {
-    backgroundColor: "rgba(47, 107, 79, 0.13)",
-    borderColor: "rgba(47, 107, 79, 0.26)",
+    backgroundColor: "rgba(255, 255, 255, 0.7)",
+    borderColor: "rgba(255, 255, 255, 1)",
     borderWidth: 1
   },
   tabButtonPressed: {
@@ -1554,16 +1641,41 @@ const styles = StyleSheet.create({
   },
   tabIcon: {
     color: "#6f675b",
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: "900",
-    lineHeight: 20
+    lineHeight: 24
   },
   tabLabel: {
     color: "#6f675b",
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: "900"
   },
   tabTextActive: {
     color: "#2f6b4f"
+  },
+  tabQuickButtonWrap: {
+    borderRadius: 29,
+    height: 58,
+    shadowColor: "#000000",
+    shadowOffset: { height: 8, width: 0 },
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    width: 58
+  },
+  tabQuickButton: {
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.45)",
+    borderColor: "rgba(255, 255, 255, 0.9)",
+    borderRadius: 29,
+    borderWidth: 1.5,
+    flex: 1,
+    justifyContent: "center",
+    overflow: "hidden"
+  },
+  tabQuickIcon: {
+    color: "#2f6b4f",
+    fontSize: 28,
+    fontWeight: "900",
+    lineHeight: 30
   }
 });
