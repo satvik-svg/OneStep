@@ -42,6 +42,7 @@ import {
   scheduleDailyTaskReminder,
   scheduleTaskReminder
 } from "./src/services/reminders";
+import { refreshHomeScreenWidget } from "./src/services/widget";
 import type { DailyProgress, Task } from "./src/types";
 import {
   formatDateKeyLabel,
@@ -354,6 +355,7 @@ function TodayApp() {
       setTimeText(getDefaultReminderTime());
       setSelectedImage(null);
       await refreshTasks();
+      await refreshHomeScreenWidget();
     } catch (error) {
       if (persistedImageUri && !taskCreated) {
         await deleteTaskImage(persistedImageUri);
@@ -376,6 +378,7 @@ function TodayApp() {
       }
       await completeTask(task.id, todayKey, new Date().toISOString());
       await refreshTasks();
+      await refreshHomeScreenWidget();
     } catch (error) {
       setMessage("Could not complete the task. Please try again.");
       console.warn(error);
@@ -403,6 +406,7 @@ function TodayApp() {
       await deleteTask(task.id);
       await deleteTaskImage(task.imageUri);
       await refreshTasks();
+      await refreshHomeScreenWidget();
     } catch (error) {
       setMessage("Could not delete the task. Please try again.");
       console.warn(error);

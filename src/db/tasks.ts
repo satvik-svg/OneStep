@@ -51,6 +51,9 @@ const getDatabase = async () => {
       }
 
       return database;
+    }).catch((error) => {
+      databasePromise = null;
+      throw error;
     });
   }
 
