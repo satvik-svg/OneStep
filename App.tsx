@@ -19,6 +19,7 @@ import {
   SafeAreaView
 } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
+import * as SplashScreen from "expo-splash-screen";
 
 import {
   completeTask,
@@ -58,6 +59,12 @@ type TaskListRow =
   | { id: string; task: Task; type: "task" };
 
 type AppTab = "today" | "daily";
+
+SplashScreen.setOptions({
+  duration: 250,
+  fade: true
+});
+void SplashScreen.preventAutoHideAsync();
 
 export default function App() {
   return (
@@ -234,6 +241,14 @@ function TodayApp() {
       appStateSubscription.remove();
     };
   }, [refreshTasks]);
+
+  useEffect(() => {
+    if (!loading) {
+      SplashScreen.hideAsync().catch((error) => {
+        console.warn("Could not hide splash screen.", error);
+      });
+    }
+  }, [loading]);
 
   const handlePickImage = async () => {
     setMessage(null);

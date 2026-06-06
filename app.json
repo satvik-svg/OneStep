@@ -26,6 +26,14 @@
         {
           "photosPermission": "Allow OneStep to attach images to your tasks."
         }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#f8f4ec"
+        }
       ]
     ],
     "android": {
