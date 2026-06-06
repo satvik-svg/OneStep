@@ -1,6 +1,5 @@
 node_modules/
 .expo/
-android/
 ios/
 dist/
 web-build/
@@ -9,3 +8,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .DS_Store
+
+# Keep android/ committed. This app has custom native Android code for the
+# home-screen widget and splash screen. Build outputs and local SDK paths are
+# ignored by android/.gitignore.

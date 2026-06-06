@@ -12,7 +12,7 @@
     "android:emulator": "expo run:android",
     "android:release": "cd android && ./gradlew assembleRelease",
     "android:install-release": "cd android && ./gradlew installRelease",
-    "export:android": "expo export --platform android --output-dir /private/tmp/onestep-export",
+    "export:android": "expo export --platform android --output-dir dist/android-export",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
