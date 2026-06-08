@@ -50,6 +50,33 @@ const getDatabase = async () => {
         );
       }
 
+      await database.execAsync(`
+        INSERT OR IGNORE INTO task_completions (
+          task_id,
+          date,
+          completed_at
+        )
+        SELECT
+          id,
+          COALESCE(
+            strftime('%Y-%m-%d', completed_at, 'localtime'),
+            substr(completed_at, 1, 10)
+          ),
+          completed_at
+        FROM tasks
+        WHERE is_recurring = 1
+          AND completed_at IS NOT NULL
+          AND COALESCE(
+            strftime('%Y-%m-%d', completed_at, 'localtime'),
+            substr(completed_at, 1, 10)
+          ) IS NOT NULL;
+
+        UPDATE tasks
+        SET completed_at = NULL
+        WHERE is_recurring = 1
+          AND completed_at IS NOT NULL;
+      `);
+
       return database;
     }).catch((error) => {
       databasePromise = null;
@@ -96,7 +123,6 @@ export const listOpenTasks = async (todayKey: string): Promise<Task[]> => {
           OR
           (
             tasks.is_recurring = 1
-            AND tasks.completed_at IS NULL
             AND task_completions.completed_at IS NULL
           )
         )
@@ -135,7 +161,6 @@ export const listRecurringTasks = async (todayKey: string): Promise<Task[]> => {
         AND task_completions.date = ?
       WHERE tasks.is_recurring = 1
         AND tasks.date <= ?
-        AND tasks.completed_at IS NULL
       ORDER BY
         CASE WHEN task_completions.completed_at IS NULL THEN 0 ELSE 1 END,
         CASE WHEN tasks.reminder_at IS NULL THEN 1 ELSE 0 END,
@@ -159,8 +184,8 @@ export const getDailyProgress = async (
       SELECT COUNT(*) AS total
       FROM tasks
       WHERE
-        date = ?
-        OR (is_recurring = 1 AND date <= ? AND completed_at IS NULL);
+        (is_recurring = 0 AND date = ?)
+        OR (is_recurring = 1 AND date <= ?);
     `,
     todayKey,
     todayKey

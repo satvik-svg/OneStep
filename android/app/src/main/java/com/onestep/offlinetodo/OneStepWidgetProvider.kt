@@ -67,7 +67,7 @@ class OneStepWidgetProvider : AppWidgetProvider() {
       }
 
       views.setTextViewText(R.id.widget_date, OneStepWidgetStore.todayLabel())
-      views.setTextViewText(R.id.widget_progress_text, "${summary.completed} of ${summary.total} done")
+      views.setTextViewText(R.id.widget_progress_text, "${summary.completed}/${summary.total} done")
       views.setTextViewText(
         R.id.widget_count_text,
           if (summary.openCount == 1) "1 active task" else "${summary.openCount} active tasks"

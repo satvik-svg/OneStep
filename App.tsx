@@ -243,6 +243,28 @@ function TodayApp() {
   }, [refreshTasks]);
 
   useEffect(() => {
+    if (loading) {
+      return;
+    }
+
+    const now = new Date();
+    const nextDay = new Date(now);
+    nextDay.setDate(now.getDate() + 1);
+    nextDay.setHours(0, 0, 1, 0);
+
+    const timeout = setTimeout(() => {
+      refreshTasks()
+        .then(refreshHomeScreenWidget)
+        .catch((error) => {
+          setMessage("Could not refresh today's tasks.");
+          console.warn(error);
+        });
+    }, Math.max(1000, nextDay.getTime() - now.getTime()));
+
+    return () => clearTimeout(timeout);
+  }, [loading, refreshTasks, todayKey]);
+
+  useEffect(() => {
     if (!loading) {
       SplashScreen.hideAsync().catch((error) => {
         console.warn("Could not hide splash screen.", error);
@@ -391,7 +413,7 @@ function TodayApp() {
       if (!task.isRecurring) {
         await cancelTaskReminder(task.notificationId);
       }
-      await completeTask(task.id, todayKey, new Date().toISOString());
+      await completeTask(task.id, getTodayKey(), new Date().toISOString());
       await refreshTasks();
       await refreshHomeScreenWidget();
     } catch (error) {

@@ -29,8 +29,8 @@ internal object OneStepWidgetStore {
           SELECT COUNT(*) AS total
           FROM tasks
           WHERE
-            date = ?
-            OR (is_recurring = 1 AND date <= ? AND completed_at IS NULL);
+            (is_recurring = 0 AND date = ?)
+            OR (is_recurring = 1 AND date <= ?);
         """.trimIndent(),
         arrayOf(todayKey, todayKey)
       )
@@ -82,7 +82,6 @@ internal object OneStepWidgetStore {
               OR
               (
                 tasks.is_recurring = 1
-                AND tasks.completed_at IS NULL
                 AND task_completions.completed_at IS NULL
               )
             )
@@ -155,7 +154,6 @@ internal object OneStepWidgetStore {
           OR
           (
             tasks.is_recurring = 1
-            AND tasks.completed_at IS NULL
             AND task_completions.completed_at IS NULL
           )
         );
