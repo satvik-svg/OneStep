@@ -1,7 +1,7 @@
 import Constants, { ExecutionEnvironment } from "expo-constants";
 import { Platform } from "react-native";
 
-export const REMINDER_CHANNEL_ID = "todo-reminders";
+export const REMINDER_CHANNEL_ID = "onestep-reminders";
 
 type NotificationsModule = typeof import("expo-notifications");
 
@@ -11,6 +11,7 @@ export type ReminderScheduleResult =
       notificationId: string;
       nextTriggerAt: string | null;
       scheduledCount: number | null;
+      warningMessage: string | null;
     }
   | { status: "denied" }
   | { status: "skipped"; reason: "past" }
@@ -66,12 +67,37 @@ export const prepareReminderChannel = async () => {
   }
 
   await Notifications.setNotificationChannelAsync(REMINDER_CHANNEL_ID, {
-    name: "Todo reminders",
+    name: "OneStep reminders",
     importance: Notifications.AndroidImportance.HIGH,
+    description: "Task reminder alerts",
     vibrationPattern: [0, 250, 250, 250],
     lightColor: "#2f6b4f",
     sound: "default"
   });
+};
+
+const getDeliveryWarning = async (Notifications: NotificationsModule) => {
+  if (Platform.OS !== "android") {
+    return null;
+  }
+
+  const channel = await Notifications.getNotificationChannelAsync(
+    REMINDER_CHANNEL_ID
+  ).catch(() => null);
+
+  if (!channel) {
+    return "Android could not find the reminder notification channel.";
+  }
+
+  if (channel.importance <= Notifications.AndroidImportance.NONE) {
+    return "The OneStep reminders channel is turned off in Android settings.";
+  }
+
+  if (channel.importance < Notifications.AndroidImportance.HIGH) {
+    return "The OneStep reminders channel is set to silent or low priority in Android settings.";
+  }
+
+  return null;
 };
 
 const hasNotificationPermission = async () => {
@@ -158,9 +184,17 @@ export const scheduleTaskReminder = async (input: {
       }),
       trigger
     });
-    const scheduleDetails = await getScheduleDetails(Notifications, trigger);
+    const [scheduleDetails, warningMessage] = await Promise.all([
+      getScheduleDetails(Notifications, trigger),
+      getDeliveryWarning(Notifications)
+    ]);
 
-    return { status: "scheduled", notificationId, ...scheduleDetails };
+    return {
+      status: "scheduled",
+      notificationId,
+      warningMessage,
+      ...scheduleDetails
+    };
   } catch (error) {
     console.warn("Could not schedule reminder", error);
     return {
@@ -207,9 +241,17 @@ export const scheduleDailyTaskReminder = async (input: {
       }),
       trigger
     });
-    const scheduleDetails = await getScheduleDetails(Notifications, trigger);
+    const [scheduleDetails, warningMessage] = await Promise.all([
+      getScheduleDetails(Notifications, trigger),
+      getDeliveryWarning(Notifications)
+    ]);
 
-    return { status: "scheduled", notificationId, ...scheduleDetails };
+    return {
+      status: "scheduled",
+      notificationId,
+      warningMessage,
+      ...scheduleDetails
+    };
   } catch (error) {
     console.warn("Could not schedule daily reminder", error);
     return {

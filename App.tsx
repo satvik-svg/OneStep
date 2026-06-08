@@ -358,10 +358,13 @@ function TodayApp() {
           const scheduleLabel = reminderResult.nextTriggerAt
             ? formatReminderTime(reminderResult.nextTriggerAt)
             : formatReminderTime(reminderDate.toISOString());
+          const deliveryWarning = reminderResult.warningMessage
+            ? ` ${reminderResult.warningMessage}`
+            : "";
           setMessage(
             composerIsRecurring
-              ? `Daily task saved. Reminder repeats near ${scheduleLabel}.`
-              : `Task saved. Reminder scheduled for ${scheduleLabel}.`
+              ? `Daily task saved. Reminder repeats near ${scheduleLabel}.${deliveryWarning}`
+              : `Task saved. Reminder scheduled for ${scheduleLabel}.${deliveryWarning}`
           );
         }
 

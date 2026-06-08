@@ -17,7 +17,7 @@
       [
         "expo-notifications",
         {
-          "defaultChannel": "todo-reminders",
+          "defaultChannel": "onestep-reminders",
           "color": "#2f6b4f"
         }
       ],
