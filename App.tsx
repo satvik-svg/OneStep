@@ -156,7 +156,7 @@ function TodayApp() {
         });
         rows.push(
           ...filteredTasks.map((task) => ({
-            id: `task-${task.id}`,
+            id: `task-${task.id}-${task.date}`,
             task,
             type: "task" as const
           }))
@@ -170,7 +170,7 @@ function TodayApp() {
       rows.push({ id: "section-today", title: "Today", type: "section" });
       rows.push(
         ...todayTasks.map((task) => ({
-          id: `task-${task.id}`,
+          id: `task-${task.id}-${task.date}`,
           task,
           type: "task" as const
         }))
@@ -185,7 +185,7 @@ function TodayApp() {
       });
       rows.push(
         ...earlierTasks.map((task) => ({
-          id: `task-${task.id}`,
+          id: `task-${task.id}-${task.date}`,
           task,
           type: "task" as const
         }))
@@ -300,7 +300,7 @@ function TodayApp() {
     }
 
     const parsedReminder = wantsReminder
-      ? parseTodayReminderTime(timeText)
+      ? parseTodayReminderTime(timeText, new Date(), composerIsRecurring)
       : null;
 
     if (parsedReminder && !parsedReminder.ok) {
@@ -416,7 +416,9 @@ function TodayApp() {
       if (!task.isRecurring) {
         await cancelTaskReminder(task.notificationId);
       }
-      await completeTask(task.id, getTodayKey(), new Date().toISOString());
+      const completionDateKey =
+        task.isRecurring && activeTab === "today" ? task.date : getTodayKey();
+      await completeTask(task.id, completionDateKey, new Date().toISOString());
       await refreshTasks();
       await refreshHomeScreenWidget();
     } catch (error) {

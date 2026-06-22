@@ -41,7 +41,8 @@ export type ParsedReminder =
 
 export const parseTodayReminderTime = (
   input: string,
-  now = new Date()
+  now = new Date(),
+  allowPast = false
 ): ParsedReminder => {
   const trimmed = input.trim();
   const match = /^(\d{1,2}):(\d{2})$/.exec(trimmed);
@@ -60,7 +61,7 @@ export const parseTodayReminderTime = (
   const reminderDate = new Date(now);
   reminderDate.setHours(hours, minutes, 0, 0);
 
-  if (reminderDate.getTime() <= now.getTime()) {
+  if (!allowPast && reminderDate.getTime() <= now.getTime()) {
     return { ok: false, message: "Choose a future time for today." };
   }
 

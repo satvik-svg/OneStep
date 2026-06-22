@@ -104,7 +104,7 @@ export const listOpenTasks = async (todayKey: string): Promise<Task[]> => {
       SELECT
         tasks.id,
         tasks.title,
-        tasks.date,
+        CASE WHEN tasks.is_recurring = 1 THEN ? ELSE tasks.date END AS date,
         tasks.reminder_at AS reminderAt,
         tasks.notification_id AS notificationId,
         tasks.image_uri AS imageUri,
@@ -133,10 +133,62 @@ export const listOpenTasks = async (todayKey: string): Promise<Task[]> => {
         tasks.created_at ASC;
     `,
     todayKey,
+    todayKey,
     todayKey
   );
 
-  return rows.map(mapTaskRow);
+  const missedRecurringRows = await database.getAllAsync<Task>(
+    `
+      WITH RECURSIVE
+        recurring_dates(task_id, due_date) AS (
+          SELECT id, date
+          FROM tasks
+          WHERE is_recurring = 1
+            AND date <= ?
+
+          UNION ALL
+
+          SELECT task_id, date(due_date, '+1 day')
+          FROM recurring_dates
+          WHERE due_date < ?
+        ),
+        missed_recurring_dates AS (
+          SELECT
+            recurring_dates.task_id,
+            MAX(recurring_dates.due_date) AS due_date
+          FROM recurring_dates
+          LEFT JOIN task_completions
+            ON task_completions.task_id = recurring_dates.task_id
+            AND task_completions.date = recurring_dates.due_date
+          WHERE recurring_dates.due_date < ?
+            AND task_completions.completed_at IS NULL
+          GROUP BY recurring_dates.task_id
+        )
+      SELECT
+        tasks.id,
+        tasks.title,
+        missed_recurring_dates.due_date AS date,
+        tasks.reminder_at AS reminderAt,
+        tasks.notification_id AS notificationId,
+        tasks.image_uri AS imageUri,
+        tasks.is_recurring AS isRecurring,
+        NULL AS completedTodayAt,
+        tasks.completed_at AS completedAt,
+        tasks.created_at AS createdAt
+      FROM missed_recurring_dates
+      INNER JOIN tasks ON tasks.id = missed_recurring_dates.task_id
+      ORDER BY
+        missed_recurring_dates.due_date DESC,
+        CASE WHEN tasks.reminder_at IS NULL THEN 1 ELSE 0 END,
+        tasks.reminder_at ASC,
+        tasks.created_at ASC;
+    `,
+    todayKey,
+    todayKey,
+    todayKey
+  );
+
+  return [...rows, ...missedRecurringRows].map(mapTaskRow);
 };
 
 export const listRecurringTasks = async (todayKey: string): Promise<Task[]> => {
